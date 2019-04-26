@@ -2,120 +2,148 @@
 #
 # pd --- user script to send data to pdplot daemon
 #
-usage="usage:  pd [-k][-n][-p][-d N] [-w window_name] [file...]"
-gopts='knp:rd:f:w:g:s:'
+USAGE="usage:  pd [-k][-n][-p][-d N] [-w window_name] [file...]"
+GOPTS='knp:rd:f:w:g:s:'
 #
-#   -n	      don't clear the existing data
-#   -k	      kill the pdplot daemon, remove the pipe
+#   -n              don't clear the existing data
+#   -k              kill the pdplot daemon, remove the pipe
 #   -g <file> dump plot to <file>.png
 #   -p <file> dump the plot to <file>.ps
 #   -f <file> dump the plot to <file>.dxf
 #   -s <file> dump the plot to <file>.svg
-#   -r	      refresh the window
+#   -r              refresh the window
 #   -d N      debug level N (default 0)
 #   -w name   specify the name of the window
 
-wd=`pwd`
-clear="clear"
-kill=0
-cmd=""
-debug=""
-given_name=""
+CWD=`pwd`
+CLEAR=${CLEAR:-clear}
+KILL=${KILL:-0}
 
 set -f
-set -- `getopt "$gopts" "$@"`; ret=$?
+set -- `getopt "$GOPTS" "$@"`; RET=$?
 set +f
-if [ $ret != 0 ] ; then
-    echo "$usage" 1>&2; exit 2
+if [ "$RET" -gt 0 ]; then
+  echo "$USAGE" 1>&2
+  exit 1
 fi
-while [ $# -gt 0 ] ; do
-    case $1 in
-	-n )	clear=""; shift ;;
-	-r )	cmd="plot"; shift ;;
-	-k )	kill=1; shift ;;
-	-d )	debug="-d $2"; shift 2 ;;
-	-p )    cmd="post $wd/$2"; shift 2 ;;
-	-f )    cmd="dxf $wd/$2"; shift 2 ;;
-	-s )    cmd="svg $wd/$2"; shift 2 ;;
-	-g )    cmd="graph $wd/$2"; shift 2 ;;
-	-w )	given_name=$2; shift 2 ;;
-	-- )	shift; break ;;
-	#### These cases should never be executed:
-	-* )	echo "$0: script error: option '$1' not handled" 1>&2; exit 2;;
-	* )	echo "$0: getopts error parsing option '$1'" 1>&2; exit 2;;
-    esac
+
+while [ ! -z "$1" ]; do
+  case $1 in
+    -n)
+      CLEAR=""
+      shift
+      ;;
+    -r)
+      CMD="plot"
+      shift
+      ;;
+    -k)
+      KILL=1
+      shift
+      ;;
+    -d)
+      DEBUG="-d $2"
+      shift 2
+      ;;
+    -p)
+      CMD="post $wd/$2"
+      shift 2
+      ;;
+    -f)
+      CMD="dxf $wd/$2"
+      shift 2
+      ;;
+    -s)
+      CMD="svg $wd/$2"
+      shift 2
+      ;;
+    -g)
+      CMD="graph $wd/$2"
+      shift 2
+      ;;
+    -w)
+      GIVEN_NAME=$2
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    # These cases should never be executed:
+    -*)
+      echo "$0 script error: option '$1' not handled" 1>&2
+      exit 3
+      ;;
+    *)
+      echo "$0: getopts error parsing option '$1'" 1>&2
+      exit 4
+      ;;
+  esac
 done
 
-# echo $cmd
+# echo $CMD
 
 # Now only filenames are left:
-files=$*
+FILES=$*
 
-pdplot=pdplot
+PDPLOT=${PDPLOT:-$CWD/PDPLOT}
 
-if [ -z "$given_name" ] ; then given_name=$(basename $0) ; fi
+GIVEN_NAME=${GIVEN_NAME:`basename $0`}
 
-displayhost=${DISPLAY%%[.:]*}
-if [ "$displayhost" = `hostname` ] ; then
-    window="$given_name"
+DISPLAYHOST=${DISPLAY%%[.:]*}
+if [ "$DISPLAYHOST" = `hostname` -o "$DISPLAYHOST" = localhost ]; then
+    WINDOW="$GIVEN_NAME"
 else
-    window="`hostname`.$given_name"
+    WINDOW="`HOSTNAME`.$GIVEN_NAME"
 fi
 
-pipedir=/var/spool/sockets/pdplot
-pipe=$pipedir/$window.$DISPLAY
-function psgrep
-{
-    ps -ef | sed '/grep/d' | grep "$pdplot *$displayarg"
-}
+PIPEDIR=${PIPEDIR:-/var/spool/sockets/pdplot}
+PIPENAME=$PIPEDIR/$WINDOW.$DISPLAY
 
-if [ "$DISPLAY" = "" ] ; then	
-    echo 'pd: $DISPLAY is not set' 1>&2
-    exit 2
-elif [ "$DISPLAY" = `hostname`:0.0 ] ; then
-    displayarg=""
-else
-    displayarg="-D $DISPLAY"
+if [ -z "$DISPLAY" ]; then
+    echo '$0: $DISPLAY is not set' 1>&2
+    exit 5
+elif [ "$DISPLAYHOST" != `hostname` -o "$DISPLAYHOST" != localhost ]; then
+    DISPLAYARG="-D $DISPLAY"
 fi
-if [ ! -d $pipedir ] ; then
-    echo "pd: creating $pipedir" 1>&2
-    mkdir $pipedir
-    chmod 777 $pipedir
+if [ ! -d $PIPEDIR ] ; then
+    echo "$0: creating $PIPEDIR" 1>&2
+    mkdir "$PIPEDIR"
+    chmod 700 "$PIPEDIR"
 fi
-if [ $kill = 1 ] ; then
-    if [ ! -p $pipe ] ; then
-	rm -f $pipe
+if [ "$KILL" = 1 ] ; then
+    if [ ! -p "$PIPENAME" ]; then
+        rm -f "$PIPENAME"
     fi
-    psgrep | awk '{print "kill " $2}' | sh
-    ps=`psgrep`
-    if [ "$ps" != "" ] ; then
-	echo "Process still alive:\n$ps"
+    PS=`pgrep -x "$PDPLOT"`
+    if [ ! -z "$PS" ]; then
+        echo "Process still alive:\n$PS"
     fi
-    exit 0
+    exit 6
 fi
-if [ ! -p $pipe ] ; then
-    echo "pd: creating $pipe" 1>&2
-    \rm -f $pipe
-    /usr/bin/mkfifo -m 666 $pipe 2>/dev/null
-fi
-
-if psgrep >/dev/null ; then
-    true    # already running
-else
-    echo "pd: starting pd daemon" 1>&2
-    #$pdplot $displayarg -X $window $debug <$pipe & 
-    #$pdplot <$pipe & 
-    $pdplot $displayarg <$pipe &
+if [ ! -p "$PIPENAME" ]; then
+    echo "$0: creating $PIPENAME" 1>&2
+    /bin/rm -f "$PIPENAME"
+    /usr/bin/mkfifo -m 0600 "$PIPENAME" 2>/dev/null
 fi
 
-if [ "$cmd" != "" ] ; then
-    echo "$cmd" >$pipe
+if pgrep -x "$PDPLOT" > /dev/null; then
+    : # already running
 else
-    {
-    echo "$clear"
-    cat $files
-    echo "" # the file might not have a newline...
-    echo "plot"
-    } >$pipe
+    echo "$0: starting pd daemon" 1>&2
+    #$PDPLOT $DISPLAYARG -X $WINDOW $DEBUG < "$PIPENAME" &
+    #$PDPLOT < "$PIPENAME" &
+    $PDPLOT $DISPLAYARG < "$PIPENAME" &
+fi
+
+if [ ! -z "$CMD" ]; then
+    echo "$CMD" > "$PIPENAME"
+else
+    (
+      echo "$CLEAR"
+      cat $FILES
+      echo "" # the file might not have a newline...
+      echo "plot"
+    ) > "$PIPENAME"
 fi
 
