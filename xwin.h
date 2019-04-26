@@ -1,6 +1,6 @@
 #include "points.h"
 
-void initX(void);
+void initX(char *geometry, char *name);
 int procXevent(char *s, int n); 
 void xwin_draw_line(double x1, double y1, double x2, double y2);
 void xwin_draw_point(double x1, double y1);
